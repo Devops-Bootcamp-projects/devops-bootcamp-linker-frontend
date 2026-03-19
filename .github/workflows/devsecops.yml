@@ -70,6 +70,9 @@ jobs:
 # -------------------------------------------------
       - name: Run Linter
         run: pnpm run lint
+        env:
+          # This is the "Magic Fix" for ESLint 9 compatibility
+          ESLINT_USE_FLAT_CONFIG: false
 
 # -------------------------------------------------
 # STEP 5: Setup Docker Buildx
