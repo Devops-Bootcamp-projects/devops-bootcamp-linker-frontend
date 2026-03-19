@@ -69,8 +69,8 @@ jobs:
 # STEP 4: Run Linter (Quality Gate)
 # -------------------------------------------------
       - name: Run Linter
-        run: pnpm exec next lint .
-        
+        run: pnpm run lint
+
 # -------------------------------------------------
 # STEP 5: Setup Docker Buildx
 # -------------------------------------------------
