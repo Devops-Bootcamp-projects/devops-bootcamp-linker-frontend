@@ -10,7 +10,10 @@ const compat = new FlatCompat({
 });
 
 const eslintConfig = [
-  ...compat.extends("next/core-web-vitals", "next/typescript"),
+  // This explicitly bridges the Next.js rules without triggering the circularity bug
+  ...compat.config({
+    extends: ["next/core-web-vitals", "next/typescript"],
+  }),
 ];
 
 export default eslintConfig;
