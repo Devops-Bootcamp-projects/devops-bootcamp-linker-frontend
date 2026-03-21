@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   packages: write
 
 env:
@@ -31,15 +31,13 @@ jobs:
           SLACK_WEBHOOK: ${{ env.SLACK_WEBHOOK }}
 
 # -----------------------------------------
-# JOB 2: Build → Scan → Report → Push
+# JOB 2: Build, Lint, Scan, Push
 # -----------------------------------------
   build-scan-push:
     needs: notify-start
     runs-on: ubuntu-latest
-    timeout-minutes: 15
 
     steps:
-
 # -----------------------------------------
 # Checkout Code
 # -----------------------------------------
@@ -47,13 +45,12 @@ jobs:
         uses: actions/checkout@v4
 
 # -----------------------------------------
-# Setup Node.js + pnpm cache
+# Setup Node.js
 # -----------------------------------------
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: 'pnpm'
 
 # -----------------------------------------
 # Install pnpm
@@ -62,6 +59,21 @@ jobs:
         uses: pnpm/action-setup@v3
         with:
           version: 9
+
+# -----------------------------------------
+# Enable pnpm cache
+# -----------------------------------------
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-
 
 # -----------------------------------------
 # Install Dependencies
