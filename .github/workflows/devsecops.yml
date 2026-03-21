@@ -134,7 +134,7 @@ jobs:
         id: trivy
         uses: aquasecurity/trivy-action@v0.35.0
         with:
-          image-ref: '${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}'
+          image-ref: '${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}'
           format: table
           output: trivy-report.txt
           exit-code: '1'
