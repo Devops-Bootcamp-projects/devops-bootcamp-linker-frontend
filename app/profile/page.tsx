@@ -3,7 +3,7 @@
 import { Button } from "@/components/ui/button";
 import DashboardLayout from "@/components/DashboardLayout";
 import React, { useEffect, useState, useTransition, useCallback } from "react";
-import { useForm } from "react-hook-form";
+import { FieldValues, useForm } from "react-hook-form";
 import axios from "axios";
 import Image from "next/image";
 import { useAuth } from "@/providers/AuthProvider";
