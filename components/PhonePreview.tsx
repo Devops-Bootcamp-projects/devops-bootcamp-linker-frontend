@@ -22,7 +22,7 @@ type ProfileData = {
 };
 
 export default function PhonePreview() {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const { refreshKey } = useProfileRefresh();
   const [profileInfo, setProfileInfo] = useState<ProfileData | null>(null);
   const [links, setLinks] = useState<LinkData[]>([]);
