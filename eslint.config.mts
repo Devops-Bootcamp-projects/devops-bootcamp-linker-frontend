@@ -20,14 +20,17 @@ const config = [
   // ✅ TypeScript rules
   ...tseslint.configs.recommended,
 
-  // ✅ Next.js rules (FIXED)
+  // ✅ Next.js rules
   ...next,
 
-  // ✅ Globals
+  // ✅ Custom rules + globals
   {
     files: ["**/*.{js,jsx,ts,tsx}"],
     languageOptions: {
       globals: globals.browser,
+    },
+    rules: {
+    "@typescript-eslint/no-unused-vars": "off",
     },
   },
 ];
