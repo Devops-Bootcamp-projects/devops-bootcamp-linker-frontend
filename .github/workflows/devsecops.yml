@@ -1,27 +1,24 @@
-# -------------------------------------------------
-# PIPELINE NAME: Frontend DevSecOps Pipeline
-# -------------------------------------------------
+name: Frontend DevSecOps Pipeline
 
-# -------------------------------------------------
-# TRIGGERS
-# -------------------------------------------------
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   workflow_dispatch:
 
-# -------------------------------------------------
-# GLOBAL VARIABLES
-# -------------------------------------------------
+permissions:
+  contents: read
+  packages: write
+
 env:
   DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
   IMAGE_NAME: devopsbootcamp-frontend
   SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
 
 jobs:
-# -------------------------------------------------
-# JOB 1: Notify Slack that pipeline started
-# -------------------------------------------------
+
+# -----------------------------------------
+# JOB 1: Notify Start
+# -----------------------------------------
   notify-start:
     runs-on: ubuntu-latest
     steps:
@@ -33,101 +30,77 @@ jobs:
           SLACK_TITLE: Pipeline Initialized
           SLACK_WEBHOOK: ${{ env.SLACK_WEBHOOK }}
 
-# -------------------------------------------------
-# JOB 2: Build, Scan and Push Docker Image
-# -------------------------------------------------
+# -----------------------------------------
+# JOB 2: Build, Lint, Scan, Push
+# -----------------------------------------
   build-scan-push:
     needs: notify-start
     runs-on: ubuntu-latest
+
     steps:
-# -------------------------------------------------
-# STEP 1: Checkout Repository
-# -------------------------------------------------
+# -----------------------------------------
+# Checkout Code
+# -----------------------------------------
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-# # -------------------------------------------------
-# # STEP 2: Install Node.js and pnpm
-# # -------------------------------------------------
-#       - name: Install Node.js
-#         uses: actions/setup-node@v4
-#         with:
-#           node-version: 20
+# -----------------------------------------
+# Setup Node.js (with caching)
+# -----------------------------------------
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
 
-#       - name: Install pnpm
-#         uses: pnpm/action-setup@v3
-#         with:
-#           version: 9
+# -----------------------------------------
+# Install Dependencies
+# -----------------------------------------
+      - name: Install Dependencies
+        run: npm ci
 
-# # -------------------------------------------------
-# # STEP 3: Install Dependencies
-# # -------------------------------------------------
-#       - name: Install Dependencies
-#         run: pnpm install --frozen-lockfile
+# -----------------------------------------
+# Lint (Fixed)
+# -----------------------------------------
+      - name: Run Linter
+        run: npm run lint
 
+# -----------------------------------------
+# Build App (Fail Fast)
+# -----------------------------------------
+      - name: Build Application
+        run: npm run build
 
-# -------------------------------------------------
-# STEP 5: Setup Docker Buildx
-# -------------------------------------------------
+# -----------------------------------------
+# Setup Docker Buildx
+# -----------------------------------------
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-# -------------------------------------------------
-# STEP 6: Login to Docker Hub
-# -------------------------------------------------
+# -----------------------------------------
+# Login to Docker Hub
+# -----------------------------------------
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
           username: ${{ env.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-# -------------------------------------------------
-# STEP 7: Generate Image Tag (Commit SHA)
-# -------------------------------------------------
-      - name: Generate Automated Version and Tag
+# -----------------------------------------
+# Generate Version Tags
+# -----------------------------------------
+      - name: Generate Version Tag
         id: vars
         run: |
           VERSION_MINOR=$((5 + ${{ github.run_number }}))
           echo "tag=1.${VERSION_MINOR}" >> $GITHUB_OUTPUT
           echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-# -------------------------------------------------
-# STEP 8: Build Docker Image
-# -------------------------------------------------
-      - name: Build Docker Image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          load: true
-          tags: ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:test
-          build-args: |
-            NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
-
-# -------------------------------------------------
-# STEP 9: Scan Docker Image for Vulnerabilities
-# -------------------------------------------------
-      - name: Scan Image (Trivy)
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: '${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:test'
-          format: 'table'
-          exit-code: '0' 
-          severity: 'CRITICAL,HIGH'
-          output: 'trivy-report.txt'
-
-# -------------------------------------------------
-# STEP 10: Upload Scan Report
-# -------------------------------------------------
-      - name: Upload Scan Report
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-trivy-report
-          path: trivy-report.txt
-
-# -------------------------------------------------
-# STEP 11: Push Docker Image to Docker Hub
-# -------------------------------------------------
-      - name: Push Image
+# -----------------------------------------
+# Build & Push Docker Image (Single Build)
+# -----------------------------------------
+      - name: Build and Push Docker Image
+        id: docker_build
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -138,10 +111,34 @@ jobs:
             ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}-${{ steps.vars.outputs.sha_short }}
           build-args: |
             NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
-# -------------------------------------------------
-# STEP 12: Final Slack Notification
-# -------------------------------------------------
+# -----------------------------------------
+# Scan Image (Fail on Vulnerabilities)
+# -----------------------------------------
+      - name: Scan Image (Trivy)
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+          image-ref: '${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}'
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+
+# -----------------------------------------
+# Upload Scan Report (Optional)
+# -----------------------------------------
+      - name: Upload Scan Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-trivy-report
+          path: trivy-report.txt
+          if-no-files-found: ignore
+
+# -----------------------------------------
+# Final Slack Notification
+# -----------------------------------------
       - name: Send Final Slack Notification
         if: always()
         uses: rtCamp/action-slack-notify@v2
