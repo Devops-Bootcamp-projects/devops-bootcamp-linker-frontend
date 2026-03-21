@@ -60,7 +60,7 @@ jobs:
         run: npm ci
 
 # -----------------------------------------
-# Lint (Fixed)
+# Lint (FIXED)
 # -----------------------------------------
       - name: Run Linter
         run: npm run lint
@@ -115,10 +115,10 @@ jobs:
           cache-to: type=gha,mode=max
 
 # -----------------------------------------
-# Scan Image (Fail on Vulnerabilities)
+# Scan Image (FAIL on Vulnerabilities)
 # -----------------------------------------
       - name: Scan Image (Trivy)
-        uses: aquasecurity/trivy-action@0.20.0
+        uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: '${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}'
           format: table
@@ -126,7 +126,7 @@ jobs:
           severity: CRITICAL,HIGH
 
 # -----------------------------------------
-# Upload Scan Report (Optional)
+# Upload Scan Report
 # -----------------------------------------
       - name: Upload Scan Report
         if: always()
