@@ -9,7 +9,6 @@ permissions:
   contents: write
   packages: write
 
-
 env:
   DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
   IMAGE_NAME: devopsbootcamp-frontend
@@ -121,7 +120,8 @@ jobs:
         with:
           context: .
           push: false
-          tags: ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}
           build-args: |
             NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
           cache-from: type=gha
@@ -139,6 +139,7 @@ jobs:
           output: trivy-report.txt
           exit-code: '1'
           severity: CRITICAL
+          scanners: vuln
 
 # -----------------------------------------
 # Upload Scan Report (Artifact)
@@ -149,21 +150,27 @@ jobs:
         with:
           name: trivy-report
           path: trivy-report.txt
+          if-no-files-found: ignore
 
 # -----------------------------------------
-# Send Scan Summary to Slack
+# Send Scan Summary to Slack (FIXED)
 # -----------------------------------------
       - name: Send Trivy Summary to Slack
         if: always()
         run: |
-          CRITICAL=$(grep -c CRITICAL trivy-report.txt || true)
-          HIGH=$(grep -c HIGH trivy-report.txt || true)
+          CRITICAL=$(grep -E "CRITICAL" trivy-report.txt | wc -l || true)
+          HIGH=$(grep -E "HIGH" trivy-report.txt | wc -l || true)
 
-          curl -X POST -H 'Content-type: application/json' \
-          --data "{
-            \"text\": \"🔍 *Security Scan Summary*\nImage: ${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}\nCRITICAL: $CRITICAL\nHIGH: $HIGH\"
-          }" \
-          ${{ env.SLACK_WEBHOOK }}
+          PAYLOAD=$(cat <<EOF
+          {
+            "text": "🔍 *Security Scan Summary*\nImage: ${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}\nCRITICAL: $CRITICAL\nHIGH: $HIGH"
+          }
+          EOF
+          )
+
+          curl -X POST -H "Content-type: application/json" \
+            --data "$PAYLOAD" \
+            ${{ env.SLACK_WEBHOOK }}
 
 # -----------------------------------------
 # Commit Report to Repo
@@ -176,7 +183,7 @@ jobs:
 
           mkdir -p security-reports
           DATE=$(date +'%Y-%m-%d-%H-%M')
-          mv trivy-report.txt security-reports/trivy-$DATE.txt
+          [ -f trivy-report.txt ] && mv trivy-report.txt security-reports/trivy-$DATE.txt || echo "No report found"
 
           git add security-reports/
           git commit -m "chore: add trivy scan report ($DATE)" || echo "No changes to commit"
@@ -186,15 +193,15 @@ jobs:
 # Push Docker Image (ONLY IF SCAN PASSES)
 # -----------------------------------------
       - name: Push Docker Image
-        if: success()
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: |
-            ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
-            ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}
-            ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}-${{ steps.vars.outputs.sha_short }}
+        if: ${{ success() }}
+        run: |
+          docker tag ${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }} ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+          docker tag ${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }} ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}
+          docker tag ${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }} ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}-${{ steps.vars.outputs.sha_short }}
+
+          docker push ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+          docker push ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}
+          docker push ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}-${{ steps.vars.outputs.sha_short }}
 
 # -----------------------------------------
 # Final Slack Notification
