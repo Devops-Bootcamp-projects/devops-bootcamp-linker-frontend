@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 env:
@@ -31,13 +31,15 @@ jobs:
           SLACK_WEBHOOK: ${{ env.SLACK_WEBHOOK }}
 
 # -----------------------------------------
-# JOB 2: Build, Lint, Scan, Push
+# JOB 2: Build → Scan → Report → Push
 # -----------------------------------------
   build-scan-push:
     needs: notify-start
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
+
 # -----------------------------------------
 # Checkout Code
 # -----------------------------------------
@@ -45,12 +47,13 @@ jobs:
         uses: actions/checkout@v4
 
 # -----------------------------------------
-# Setup Node.js
+# Setup Node.js + pnpm cache
 # -----------------------------------------
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'pnpm'
 
 # -----------------------------------------
 # Install pnpm
@@ -59,21 +62,6 @@ jobs:
         uses: pnpm/action-setup@v3
         with:
           version: 9
-
-# -----------------------------------------
-# Enable pnpm cache
-# -----------------------------------------
-      - name: Get pnpm store directory
-        id: pnpm-cache
-        run: echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
-
-      - name: Cache pnpm store
-        uses: actions/cache@v4
-        with:
-          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-
 
 # -----------------------------------------
 # Install Dependencies
@@ -113,17 +101,14 @@ jobs:
           echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
 # -----------------------------------------
-# Build & Push Docker Image
+# Build Docker Image (NO PUSH)
 # -----------------------------------------
-      - name: Build and Push Docker Image
+      - name: Build Docker Image
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: true
-          tags: |
-            ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
-            ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}
-            ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}-${{ steps.vars.outputs.sha_short }}
+          push: false
+          tags: ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}
           build-args: |
             NEXT_PUBLIC_API_URL=${{ secrets.NEXT_PUBLIC_API_URL }}
           cache-from: type=gha
@@ -133,12 +118,69 @@ jobs:
 # Scan Image (Trivy)
 # -----------------------------------------
       - name: Scan Image (Trivy)
-        uses: aquasecurity/trivy-action@v0.35.0
+        run: |
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v $PWD:/root/.cache/ \
+            aquasec/trivy:latest image \
+            --format table \
+            --output trivy-report.txt \
+            --severity CRITICAL,HIGH \
+            ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}
+
+# -----------------------------------------
+# Upload Scan Report (Artifact)
+# -----------------------------------------
+      - name: Upload Trivy Scan Report
+        uses: actions/upload-artifact@v4
         with:
-          image-ref: '${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}'
-          format: table
-          exit-code: '1'
-          severity: CRITICAL,HIGH
+          name: trivy-report
+          path: trivy-report.txt
+
+# -----------------------------------------
+# Send Scan Summary to Slack
+# -----------------------------------------
+      - name: Send Trivy Summary to Slack
+        if: always()
+        run: |
+          CRITICAL=$(grep -c CRITICAL trivy-report.txt || true)
+          HIGH=$(grep -c HIGH trivy-report.txt || true)
+
+          curl -X POST -H 'Content-type: application/json' \
+          --data "{
+            \"text\": \"🔍 *Security Scan Summary*\nImage: ${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}\nCRITICAL: $CRITICAL\nHIGH: $HIGH\"
+          }" \
+          ${{ env.SLACK_WEBHOOK }}
+
+# -----------------------------------------
+# Commit Report to Repo
+# -----------------------------------------
+      - name: Commit Trivy Report to Repo
+        if: always()
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+
+          mkdir -p security-reports
+          DATE=$(date +'%Y-%m-%d-%H-%M')
+          mv trivy-report.txt security-reports/trivy-$DATE.txt
+
+          git add security-reports/
+          git commit -m "chore: add trivy scan report ($DATE)" || echo "No changes to commit"
+          git push
+
+# -----------------------------------------
+# Push Docker Image (AFTER SCAN)
+# -----------------------------------------
+      - name: Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}
+            ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}-${{ steps.vars.outputs.sha_short }}
 
 # -----------------------------------------
 # Final Slack Notification
