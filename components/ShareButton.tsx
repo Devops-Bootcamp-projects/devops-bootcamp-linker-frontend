@@ -3,8 +3,11 @@
 import React, { useState } from 'react'
 import { FaShareNodes, FaCheck } from 'react-icons/fa6'
 
+interface ShareButtonProps {
+    userId: string
+}
 
-export default function ShareButton() {
+export default function ShareButton({ userId }: ShareButtonProps) {
     const [copied, setCopied] = useState(false)
 
     const handleShare = async () => {
