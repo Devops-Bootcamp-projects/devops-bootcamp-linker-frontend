@@ -6,8 +6,9 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   packages: write
+
 
 env:
   DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
@@ -127,23 +128,23 @@ jobs:
           cache-to: type=gha,mode=max
 
 # -----------------------------------------
-# Scan Image (Trivy)
+# Scan Image (FAIL ONLY ON CRITICAL)
 # -----------------------------------------
       - name: Scan Image (Trivy)
-        run: |
-          docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            -v $PWD:/root/.cache/ \
-            aquasec/trivy:latest image \
-            --format table \
-            --output trivy-report.txt \
-            --severity CRITICAL,HIGH \
-            ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}
+        id: trivy
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          image-ref: '${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}'
+          format: table
+          output: trivy-report.txt
+          exit-code: '1'
+          severity: CRITICAL
 
 # -----------------------------------------
 # Upload Scan Report (Artifact)
 # -----------------------------------------
       - name: Upload Trivy Scan Report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: trivy-report
@@ -182,9 +183,10 @@ jobs:
           git push
 
 # -----------------------------------------
-# Push Docker Image (AFTER SCAN)
+# Push Docker Image (ONLY IF SCAN PASSES)
 # -----------------------------------------
       - name: Push Docker Image
+        if: success()
         uses: docker/build-push-action@v5
         with:
           context: .
