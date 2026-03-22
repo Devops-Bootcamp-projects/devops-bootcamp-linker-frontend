@@ -12,7 +12,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
 
 # --- Build ---
-FROM base AS build
+FROM base AS build 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
