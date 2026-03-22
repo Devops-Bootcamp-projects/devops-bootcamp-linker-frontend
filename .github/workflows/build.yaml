@@ -3,9 +3,9 @@ name: Frontend Build Pipeline
 on:
   workflow_dispatch:
   push:
-    branches: 
+    branches:
       - main
-  paths-ignore:
+    paths-ignore:
       - '.github/workflows/**'
       - '**/*.md'
 
