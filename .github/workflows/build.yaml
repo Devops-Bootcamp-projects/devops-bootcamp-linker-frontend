@@ -1,0 +1,98 @@
+name: Frontend Build Pipeline
+
+on:
+  workflow_dispatch:
+  push:
+    branches: 
+      - main
+  paths-ignore:
+      - '.github/workflows/**'
+      - '**/*.md'
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+  IMAGE_NAME: devopsbootcamp-frontend
+  SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+
+jobs:
+
+# -----------------------------------------
+# Notify Start
+# -----------------------------------------
+  notify-start:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ env.SLACK_WEBHOOK }}
+          SLACK_MESSAGE: "🚀 Frontend Build Started"
+
+# -----------------------------------------
+# Build → Scan → Push
+# -----------------------------------------
+  build:
+    needs: notify-start
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - run: pnpm install --frozen-lockfile
+
+# Docker Setup
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+# Version
+      - name: Generate Tag
+        id: vars
+        run: echo "tag=1.${{ github.run_number }}" >> $GITHUB_OUTPUT
+
+# Build Image
+      - name: Build Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}
+
+# Scan Image
+      - name: Scan Image (Trivy)
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          image-ref: '${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}'
+          severity: CRITICAL
+          exit-code: '1'
+
+# Push Image
+      - name: Push Docker Image
+        if: ${{ success() }}
+        run: |
+          docker tag ${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }} ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}
+          docker push ${{ env.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}:${{ steps.vars.outputs.tag }}
+
+# Final Slack
+      - name: Final Notification
+        if: always()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ env.SLACK_WEBHOOK }}
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_MESSAGE: "Frontend Build: ${{ job.status }}"
