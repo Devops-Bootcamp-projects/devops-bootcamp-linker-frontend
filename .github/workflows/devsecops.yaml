@@ -1,0 +1,157 @@
+name: Frontend DevSecOps Pipeline
+
+on:
+  pull_request:
+    branches: 
+      - main
+    paths-ignore:
+      - '.github/workflows/**'
+      - '**/*.md'
+
+jobs:
+
+# -----------------------------------------
+# Notify Start
+# -----------------------------------------
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Slack Notification
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_MESSAGE: |
+            🚀 Frontend PR triggered by ${{ github.actor }}
+
+            PR: ${{ github.event.pull_request.html_url }}
+            Branch: ${{ github.head_ref }}
+            Title: ${{ github.event.pull_request.title }}
+          SLACK_TITLE: Frontend DevSecOps Pipeline
+
+# -----------------------------------------
+# LINT
+# -----------------------------------------
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Run Linter
+        run: pnpm run lint
+
+# -----------------------------------------
+# SCA
+# -----------------------------------------
+  sca:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - run: pnpm install
+
+      - name: Run audit
+        run: pnpm audit --json > audit.json || true
+
+      - name: Enforce policy
+        run: |
+          CRITICAL=$(grep -o '"critical":[0-9]*' audit.json | grep -o '[0-9]*' || echo 0)
+          HIGH=$(grep -o '"high":[0-9]*' audit.json | grep -o '[0-9]*' || echo 0)
+
+          if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+            echo "❌ Vulnerabilities found"
+            exit 1
+          else
+            echo "✅ Safe dependencies"
+          fi
+
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-sca-report
+          path: audit.json
+
+# -----------------------------------------
+# SAST
+# -----------------------------------------
+  sast:
+    runs-on: ubuntu-latest
+
+    container:
+      image: semgrep/semgrep
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        run: semgrep scan --error --json-output=semgrep-results.json
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-sast-report
+          path: semgrep-results.json
+
+      - name: Slack Notification (Failure)
+        if: ${{ failure() }}
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: danger
+          SLACK_MESSAGE: "❌ Frontend SAST failed"
+
+      - name: Slack Notification (Success)
+        if: ${{ success() }}
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: good
+          SLACK_MESSAGE: "✅ Frontend SAST passed"
+
+      - name: Slack Report Link
+        if: always()
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_MESSAGE: |
+            📊 Frontend DevSecOps Reports:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+# -----------------------------------------
+# Final Notification
+# -----------------------------------------
+  notify-final:
+    needs: [lint, sca, sast]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: ${{ job.status }}
+          SLACK_MESSAGE: |
+            Frontend DevSecOps: ${{ job.status }}
+
+            Reports:
+            ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
